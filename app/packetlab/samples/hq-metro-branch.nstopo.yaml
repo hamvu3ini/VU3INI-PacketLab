@@ -1,0 +1,322 @@
+nstopo: "0.1"
+meta:
+  name: hq-metro-branch
+  author: VU3INI
+  description: Campus LAN with redundant core, metro E-LAN to a city data centre, MPLS L3VPN to a branch with an IPsec backup over the Internet
+
+defaults:
+  mode: sim
+  cli_style: ios
+
+sites:
+  hq:     { scope: lan, label: "HQ campus" }
+  metro:  { scope: man, label: "City metro ring" }
+  dc:     { scope: lan, label: "City data centre" }
+  sp:     { scope: wan, label: "MPLS provider" }
+  inet:   { scope: wan, label: "Internet" }
+  branch: { scope: lan, label: "Branch office" }
+
+link_profiles:
+  campus-10g: { bandwidth: 10Gbps, delay: 0.05ms, media: fibre }
+  access-1g:  { bandwidth: 1Gbps,  delay: 0.02ms, media: copper }
+  metro-10g:  { bandwidth: 10Gbps, media: fibre }
+  core-100g:  { bandwidth: 100Gbps, media: fibre }
+  mpls-100m:  { bandwidth: 100Mbps, delay: 18ms, jitter: 1ms, loss: 0.01% }
+  inet-50m:   { bandwidth: 50Mbps,  delay: 35ms, jitter: 6ms, loss: 0.3% }
+
+addressing:
+  loopbacks: { ipv4: 10.255.0.0/24, purpose: loopback }
+  p2p:       { ipv4: 10.254.0.0/24, purpose: p2p }
+  hq-users:  { ipv4: 10.10.10.0/24, purpose: lan }
+  hq-voice:  { ipv4: 10.10.20.0/24, purpose: lan }
+  hq-srv:    { ipv4: 10.10.30.0/24, purpose: lan }
+
+nodes:
+  # ---------------- HQ campus LAN ----------------
+  core1:
+    kind: l3switch
+    site: hq
+    role: core
+    vlans: { 10: users, 20: voice, 30: servers, 100: metro }
+    interfaces:
+      Po1:      { mode: trunk, allowed_vlans: [10, 20, 30], lag: { protocol: lacp, members: [Te1/0/1, Te1/0/2] } }
+      Te1/0/3:  { mode: trunk, allowed_vlans: [10, 20, 30] }
+      Te1/0/4:  { mode: trunk, allowed_vlans: [10, 20, 30] }
+      Te1/0/5:  { mode: access, vlan: 100 }
+      Gi1/0/1:  { mode: access, vlan: 30 }
+      Gi1/0/48: { mode: routed, ipv4: auto }
+      Lo0:      { ipv4: 10.255.0.1/32 }
+      Vlan10:   { ipv4: 10.10.10.2/24, helper: 10.10.30.10 }
+      Vlan20:   { ipv4: 10.10.20.2/24, helper: 10.10.30.10 }
+      Vlan30:   { ipv4: 10.10.30.2/24 }
+      Vlan100:  { ipv4: 10.100.0.1/24 }
+    stp: { mode: rstp, priority: 4096 }
+    routing:
+      vrrp:
+        - { group: 10, interface: Vlan10, vip: 10.10.10.1, priority: 120, advert: 0.5 }
+        - { group: 20, interface: Vlan20, vip: 10.10.20.1, priority: 120, advert: 0.5 }
+        - { group: 30, interface: Vlan30, vip: 10.10.30.1, priority: 120, advert: 0.5 }
+      ospf:
+        process: 1
+        areas: { 0: [Lo0, Gi1/0/48, Vlan10, Vlan20, Vlan30, Vlan100] }
+        passive: [Vlan10, Vlan20]
+
+  core2:
+    kind: l3switch
+    site: hq
+    role: core
+    vlans: { 10: users, 20: voice, 30: servers, 100: metro }
+    interfaces:
+      Po1:      { mode: trunk, allowed_vlans: [10, 20, 30], lag: { protocol: lacp, members: [Te1/0/1, Te1/0/2] } }
+      Te1/0/3:  { mode: trunk, allowed_vlans: [10, 20, 30] }
+      Te1/0/4:  { mode: trunk, allowed_vlans: [10, 20, 30] }
+      Te1/0/5:  { mode: access, vlan: 100 }
+      Lo0:      { ipv4: 10.255.0.2/32 }
+      Vlan100:  { ipv4: 10.100.0.2/24 }
+      Vlan10:   { ipv4: 10.10.10.3/24, helper: 10.10.30.10 }
+      Vlan20:   { ipv4: 10.10.20.3/24, helper: 10.10.30.10 }
+      Vlan30:   { ipv4: 10.10.30.3/24 }
+    stp: { mode: rstp, priority: 8192 }
+    routing:
+      vrrp:
+        - { group: 10, interface: Vlan10, vip: 10.10.10.1, priority: 100, advert: 0.5 }
+        - { group: 20, interface: Vlan20, vip: 10.10.20.1, priority: 100, advert: 0.5 }
+        - { group: 30, interface: Vlan30, vip: 10.10.30.1, priority: 100, advert: 0.5 }
+      ospf:
+        process: 1
+        areas: { 0: [Lo0, Vlan10, Vlan20, Vlan30, Vlan100] }
+        passive: [Vlan10, Vlan20]
+
+  acc1:
+    kind: switch
+    site: hq
+    role: access
+    vlans: { 10: users, 20: voice }
+    interfaces:
+      Gi0/1:  { mode: access, vlan: 10, voice_vlan: 20, portfast: true }
+      Te0/49: { mode: trunk, allowed_vlans: [10, 20, 30] }
+      Te0/50: { mode: trunk, allowed_vlans: [10, 20, 30] }
+  acc2:
+    inherit: acc1
+
+  pc1:  { kind: host, site: hq, interfaces: { eth0: { ipv4: dhcp } } }
+  pc2:  { kind: host, site: hq, interfaces: { eth0: { ipv4: dhcp } } }
+  srv1:
+    kind: server
+    site: hq
+    interfaces: { eth0: { ipv4: 10.10.30.10/24, gateway: 10.10.30.1 } }
+    services:
+      dhcp: { pools: [hq-users, hq-voice] }
+      dns:  { zone: corp.lan }
+      listen: [22, 53, 80, 443]
+
+  hq-edge:
+    kind: router
+    site: hq
+    role: ce
+    interfaces:
+      Gi0/0: { ipv4: auto }
+      Gi0/1: { ipv4: 172.16.1.2/30, acl_in: BRANCH-IN }
+      Gi0/2: { ipv4: 198.18.0.2/30 }
+      Tun0:  { ipv4: 10.254.9.1/30, acl_in: BRANCH-IN, tunnel: { type: ipsec, peer: br-edge, source: Gi0/2, ike: v2, profile: aes256-gcm-sha384 } }
+    routing:
+      ospf: { process: 1, areas: { 0: [Gi0/0] }, redistribute: [bgp], default_originate: true }
+      bgp:
+        asn: 65010
+        networks: [10.10.10.0/24, 10.10.20.0/24, 10.10.30.0/24]
+        neighbors:
+          - { peer: 172.16.1.1, remote_as: 65000, bfd: true }
+          - { peer: 10.254.9.2, remote_as: 65030, local_pref: 50 }
+    policies: { nat: { inside: [Gi0/0], outside: Gi0/2, overload: true } }
+
+  # ---------------- Metro MAN (G.8032 ring) ----------------
+  m1: { kind: switch, site: metro, role: provider-edge, model: metro-ethernet }
+  m2: { kind: switch, site: metro, role: provider-edge, model: metro-ethernet }
+  m3: { kind: switch, site: metro, role: provider-edge, model: metro-ethernet }
+  dc-sw:
+    kind: l3switch
+    site: dc
+    vlans: { 30: servers, 100: metro }
+    interfaces:
+      Te1/0/1: { mode: access, vlan: 100 }
+      Gi1/0/1: { mode: access, vlan: 30 }
+      Vlan100: { ipv4: 10.100.0.20/24 }
+      Vlan30:  { ipv4: 10.20.30.1/24 }
+    routing: { ospf: { process: 1, areas: { 0: [Vlan100, Vlan30] } } }
+  dc-srv:
+    kind: server
+    site: dc
+    interfaces: { eth0: { ipv4: 10.20.30.10/24, gateway: 10.20.30.1 } }
+
+  # ---------------- WAN: MPLS provider ----------------
+  pe1:
+    kind: router
+    site: sp
+    role: pe
+    interfaces:
+      eth1: { ipv4: 172.16.1.1/30 }
+      eth2: { ipv4: 10.0.12.1/30 }
+      Lo0:  { ipv4: 192.0.2.1/32 }
+    routing:
+      isis: { level: 2, interfaces: [eth2, Lo0] }
+      mpls: { ldp: true }
+      bgp:
+        asn: 65000
+        neighbors:
+          - { peer: 172.16.1.2, remote_as: 65010 }
+          - { peer: 192.0.2.3, remote_as: 65000 }
+  p1:
+    kind: router
+    site: sp
+    role: p
+    interfaces:
+      eth1: { ipv4: 10.0.12.2/30 }
+      eth2: { ipv4: 10.0.23.1/30 }
+      Lo0:  { ipv4: 192.0.2.2/32 }
+    routing: { isis: { level: 2 }, mpls: { ldp: true } }
+  pe2:
+    kind: router
+    site: sp
+    role: pe
+    interfaces:
+      eth1: { ipv4: 172.16.2.1/30 }
+      eth2: { ipv4: 10.0.23.2/30 }
+      Lo0:  { ipv4: 192.0.2.3/32 }
+    routing:
+      isis: { level: 2, interfaces: [eth2, Lo0] }
+      mpls: { ldp: true }
+      bgp:
+        asn: 65000
+        neighbors:
+          - { peer: 172.16.2.2, remote_as: 65030 }
+          - { peer: 192.0.2.1, remote_as: 65000 }
+  internet: { kind: cloud, site: inet }
+
+  # ---------------- Branch LAN ----------------
+  br-edge:
+    kind: router
+    site: branch
+    role: ce
+    interfaces:
+      Gi0/0: { ipv4: 10.30.10.1/24 }
+      Gi0/1: { ipv4: 172.16.2.2/30 }
+      Gi0/2: { ipv4: 198.18.1.2/30 }
+      Tun0:  { ipv4: 10.254.9.2/30, tunnel: { type: ipsec, peer: hq-edge, source: Gi0/2, ike: v2 } }
+    routing:
+      bgp:
+        asn: 65030
+        networks: [10.30.10.0/24]
+        neighbors:
+          - { peer: 172.16.2.1, remote_as: 65000 }
+          - { peer: 10.254.9.1, remote_as: 65010, local_pref: 50 }
+  br-sw:  { kind: switch, site: branch, vlans: { 10: users }, interfaces: { Gi0/1: { vlan: 10 }, Gi0/2: { vlan: 10 } } }
+  br-pc1: { kind: host, site: branch, interfaces: { eth0: { ipv4: 10.30.10.50/24, gateway: 10.30.10.1 } } }
+
+links:
+  - { a: core1:Te1/0/1, b: core2:Te1/0/1, profile: campus-10g }
+  - { a: core1:Te1/0/2, b: core2:Te1/0/2, profile: campus-10g }
+  - { a: core1:Te1/0/3, b: acc1:Te0/49, profile: campus-10g }
+  - { a: core2:Te1/0/3, b: acc1:Te0/50, profile: campus-10g }
+  - { a: core1:Te1/0/4, b: acc2:Te0/49, profile: campus-10g }
+  - { a: core2:Te1/0/4, b: acc2:Te0/50, profile: campus-10g }
+  - { a: acc1:Gi0/1, b: pc1:eth0, profile: access-1g }
+  - { a: acc2:Gi0/1, b: pc2:eth0, profile: access-1g }
+  - { a: core1:Gi1/0/1, b: srv1:eth0, profile: access-1g }
+  - { a: core1:Gi1/0/48, b: hq-edge:Gi0/0, profile: access-1g }
+  - { a: core1:Te1/0/5, b: m1:uni1, profile: metro-10g, length_km: 0.2 }
+  - { a: core2:Te1/0/5, b: m3:uni1, profile: metro-10g, length_km: 0.4 }
+  - { a: m1:ring-e, b: m2:ring-w, profile: metro-10g, length_km: 12, label: ring-1-2 }
+  - { a: m2:ring-e, b: m3:ring-w, profile: metro-10g, length_km: 9, label: ring-2-3 }
+  - { a: m3:ring-e, b: m1:ring-w, profile: metro-10g, length_km: 15, label: ring-3-1 }
+  - { a: m2:uni1, b: dc-sw:Te1/0/1, profile: metro-10g, length_km: 0.3 }
+  - { a: dc-sw:Gi1/0/1, b: dc-srv:eth0, profile: access-1g }
+  - { a: hq-edge:Gi0/1, b: pe1:eth1, profile: mpls-100m, type: wan-circuit, label: hq-mpls }
+  - { a: pe1:eth2, b: p1:eth1, profile: core-100g, length_km: 400 }
+  - { a: p1:eth2, b: pe2:eth2, profile: core-100g, length_km: 650 }
+  - { a: pe2:eth1, b: br-edge:Gi0/1, profile: mpls-100m, type: wan-circuit, label: br-mpls }
+  - { a: hq-edge:Gi0/2, b: internet:port1, profile: inet-50m, label: hq-inet }
+  - { a: br-edge:Gi0/2, b: internet:port2, profile: inet-50m, label: br-inet }
+  - { a: br-edge:Gi0/0, b: br-sw:Gi0/1, profile: access-1g }
+  - { a: br-sw:Gi0/2, b: br-pc1:eth0, profile: access-1g }
+
+services:
+  metro-elan:
+    type: mef-elan
+    members: [m1:uni1, m2:uni1, m3:uni1]
+    cir: 1Gbps
+    eir: 2Gbps
+    protection: { type: g8032, rpl_owner: m3:ring-e }
+  corp:
+    type: l3vpn
+    rd: "65000:100"
+    attachments: [pe1:eth1, pe2:eth1]
+  voice-qos:
+    type: qos
+    classes: { voice: { dscp: EF, priority: true, max: 20% }, video: { dscp: AF41 }, default: { dscp: BE } }
+    apply_to: [hq-mpls, br-mpls]
+
+policies:
+  acl:
+    BRANCH-IN:
+      - { action: deny, proto: tcp, src: 10.30.10.0/24, dst: 10.10.30.10/32, dport: 22 }
+      - { action: permit, proto: ip }
+
+scenarios:
+  core1-fails:
+    steps:
+      - { at: 0s, action: traffic, params: { from: pc1, to: dc-srv, type: udp, rate: 200Mbps, duration: 60s } }
+      - { at: 10s, action: node_reboot, target: core1, params: { duration: 60s } }
+  ring-cut:
+    steps:
+      - { at: 5s, action: link_down, target: ring-1-2 }
+  mpls-outage:
+    steps:
+      - { at: 5s, action: link_down, target: hq-mpls }
+      - { at: 65s, action: link_up, target: hq-mpls }
+
+tests:
+  - { id: no-overlaps, type: static.addressing }
+  - { id: vlans-match, type: static.vlan_consistency }
+  - { id: ospf-full, type: ospf.neighbor, on: core1, expect: { state: FULL, count: 4 } }
+  - { id: bgp-up, type: bgp.session, on: hq-edge, peer: 172.16.1.1, expect: { state: Established } }
+  - { id: dhcp-works, type: dhcp.lease, on: pc1, expect: { pool: hq-users } }
+  - { id: vrrp-master, type: vrrp.state, on: core1, group: 10, expect: { state: MASTER } }
+  - { id: stp-root, type: stp.root, vlan: 10, expect: { bridge: core1 } }
+  - { id: hq-to-dc, type: ping, from: pc1, to: dc-srv, expect: { loss_max: 0% } }
+  - { id: hq-to-branch, type: traceroute, from: pc1, to: br-pc1, expect: { via: [hq-edge, pe1, p1, pe2, br-edge] } }
+  - { id: ssh-blocked, type: tcp.connect, from: br-pc1, to: srv1, port: 22, expect: { open: false } }
+  - { id: web-open, type: tcp.connect, from: br-pc1, to: srv1, port: 443, expect: { open: true } }
+  - { id: dns-works, type: dns.resolve, on: pc1, name: dc-srv.corp.lan, expect: { address: 10.20.30.10 } }
+  - { id: fhrp-failover, type: ping, from: pc1, to: dc-srv, during: core1-fails, expect: { max_outage: 3s } }
+  - { id: ring-heals, type: ping, from: pc1, to: dc-srv, during: ring-cut, expect: { max_outage: 50ms }, standard: ITU-T G.8032 }
+  - { id: ipsec-backup, type: traceroute, from: pc1, to: br-pc1, during: mpls-outage, at: 30s, expect: { via: [hq-edge, br-edge] } }
+  - { id: elan-sla, type: y1564, service: metro-elan, expect: { cir: met, flr_max: 0.01%, ftd_max: 1ms, fdv_max: 0.5ms }, standard: ITU-T Y.1564 }
+  - { id: wan-throughput, type: rfc2544.throughput, link: hq-mpls, frame_sizes: [64, 512, 1518], expect: { min: 75Mbps } }
+  - { id: voice-delay, type: twamp, from: pc1, to: br-pc1, dscp: EF, expect: { one_way_max: 150ms, jitter_max: 30ms }, standard: ITU-T G.114 }
+
+capture:
+  points: [hq-mpls, core1:Gi1/0/48]
+  format: pcapng
+
+layout:
+  nodes:
+    pc1: { x: 80, y: 520 }
+    pc2: { x: 300, y: 520 }
+    acc1: { x: 80, y: 400 }
+    acc2: { x: 300, y: 400 }
+    core1: { x: 80, y: 260 }
+    core2: { x: 300, y: 260 }
+    srv1: { x: -100, y: 260 }
+    hq-edge: { x: 190, y: 120 }
+    m1: { x: 560, y: 260 }
+    m2: { x: 760, y: 260 }
+    m3: { x: 660, y: 400 }
+    dc-sw: { x: 940, y: 260 }
+    dc-srv: { x: 1100, y: 260 }
+    pe1: { x: 380, y: 0 }
+    p1: { x: 600, y: 0 }
+    pe2: { x: 820, y: 0 }
+    internet: { x: 600, y: -150 }
+    br-edge: { x: 1040, y: 0 }
+    br-sw: { x: 1040, y: 120 }
+    br-pc1: { x: 1200, y: 120 }

@@ -1,0 +1,52 @@
+nstopo: "0.1"
+meta:
+  name: ospf-wan-triangle
+  author: VU3INI
+  description: Three city routers in an OSPF triangle over leased lines with BFD-style fast failover tests
+sites:
+  guwahati: { scope: lan, label: "Guwahati" }
+  shillong: { scope: lan, label: "Shillong" }
+  tura:     { scope: lan, label: "Tura" }
+  wan:      { scope: wan, label: "Leased lines" }
+link_profiles:
+  lan-1g:    { bandwidth: 1Gbps, delay: 0.02ms }
+  leased-1g: { bandwidth: 1Gbps, media: fibre }
+  backup-100m: { bandwidth: 100Mbps, delay: 8ms, jitter: 1ms }
+addressing:
+  p2p:       { ipv4: 10.0.0.0/24, purpose: p2p }
+  loopbacks: { ipv4: 10.255.255.0/24, purpose: loopback }
+nodes:
+  GHY: { kind: router, site: guwahati, interfaces: { Lo0: { ipv4: auto }, Gi0/0: { ipv4: 10.1.0.1/24 }, Gi0/1: { ipv4: auto }, Gi0/2: { ipv4: auto } },
+         routing: { ospf: { process: 1, areas: { 0: all } } } }
+  SHL: { kind: router, site: shillong, interfaces: { Lo0: { ipv4: auto }, Gi0/0: { ipv4: 10.2.0.1/24 }, Gi0/1: { ipv4: auto }, Gi0/2: { ipv4: auto } },
+         routing: { ospf: { process: 1, areas: { 0: all } } } }
+  TURA: { kind: router, site: tura, interfaces: { Lo0: { ipv4: auto }, Gi0/0: { ipv4: 10.3.0.1/24 }, Gi0/1: { ipv4: auto }, Gi0/2: { ipv4: auto } },
+         routing: { ospf: { process: 1, areas: { 0: all } } } }
+  PC-GHY:  { kind: host, site: guwahati, interfaces: { eth0: { ipv4: 10.1.0.10/24, gateway: 10.1.0.1 } } }
+  PC-SHL:  { kind: host, site: shillong, interfaces: { eth0: { ipv4: 10.2.0.10/24, gateway: 10.2.0.1 } } }
+  PC-TURA: { kind: host, site: tura, interfaces: { eth0: { ipv4: 10.3.0.10/24, gateway: 10.3.0.1 } } }
+links:
+  - { a: GHY:Gi0/1, b: SHL:Gi0/2, profile: leased-1g, length_km: 100, label: ghy-shl }
+  - { a: SHL:Gi0/1, b: TURA:Gi0/2, profile: leased-1g, length_km: 320, label: shl-tura }
+  - { a: TURA:Gi0/1, b: GHY:Gi0/2, profile: backup-100m, length_km: 220, label: tura-ghy }
+  - { a: GHY:Gi0/0, b: PC-GHY:eth0, profile: lan-1g }
+  - { a: SHL:Gi0/0, b: PC-SHL:eth0, profile: lan-1g }
+  - { a: TURA:Gi0/0, b: PC-TURA:eth0, profile: lan-1g }
+scenarios:
+  cut-ghy-shl:
+    steps:
+      - { at: 5s, action: link_down, target: ghy-shl }
+      - { at: 40s, action: link_up, target: ghy-shl }
+tests:
+  - { id: ghy-adj, type: ospf.neighbor, on: GHY, expect: { state: FULL, count: 2 } }
+  - { id: ghy-shl, type: ping, from: PC-GHY, to: PC-SHL, expect: { loss_max: 0%, rtt_max: 5ms } }
+  - { id: tura-path, type: traceroute, from: PC-GHY, to: PC-TURA, expect: { via: [GHY, SHL, TURA] } }
+  - { id: reroute, type: ping, from: PC-GHY, to: PC-SHL, during: cut-ghy-shl, expect: { max_outage: 1s } }
+layout:
+  nodes:
+    GHY: { x: 100, y: 100 }
+    SHL: { x: 420, y: 100 }
+    TURA: { x: 260, y: 330 }
+    PC-GHY: { x: -60, y: 100 }
+    PC-SHL: { x: 580, y: 100 }
+    PC-TURA: { x: 260, y: 470 }

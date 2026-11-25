@@ -1,0 +1,43 @@
+nstopo: "0.1"
+meta:
+  name: troubleshooting-lab
+  author: VU3INI
+  description: "PRACTICE LAB - this network has three planted faults. Run the tests, then fix the YAML or use the consoles until all tests pass. Hints are in Help > Labs."
+sites:
+  campus: { scope: lan, label: "Campus" }
+link_profiles:
+  access-1g: { bandwidth: 1Gbps, delay: 0.02ms }
+nodes:
+  DIST:
+    kind: l3switch
+    site: campus
+    vlans: { 10: sales, 20: eng }
+    interfaces:
+      Gi0/1: { mode: trunk, allowed_vlans: [10, 20], native_vlan: 99 }
+      Vlan10: { ipv4: 172.16.10.1/24 }
+      Vlan20: { ipv4: 172.16.20.1/24 }
+  ACC:
+    kind: switch
+    site: campus
+    vlans: { 10: sales, 20: eng }
+    interfaces:
+      Gi0/24: { mode: trunk, allowed_vlans: [10] }
+      Gi0/1: { vlan: 10 }
+      Gi0/2: { vlan: 20 }
+  SALES-PC: { kind: host, site: campus, interfaces: { eth0: { ipv4: 172.16.10.20/24, gateway: 172.16.10.254 } } }
+  ENG-PC:   { kind: host, site: campus, interfaces: { eth0: { ipv4: 172.16.20.20/24, gateway: 172.16.20.1 } } }
+links:
+  - { a: DIST:Gi0/1, b: ACC:Gi0/24, profile: access-1g }
+  - { a: ACC:Gi0/1, b: SALES-PC:eth0, profile: access-1g }
+  - { a: ACC:Gi0/2, b: ENG-PC:eth0, profile: access-1g }
+tests:
+  - { id: trunk-ok, type: static.vlan_consistency }
+  - { id: sales-gw, type: ping, from: SALES-PC, to: 172.16.10.1 }
+  - { id: eng-gw, type: ping, from: ENG-PC, to: 172.16.20.1 }
+  - { id: sales-to-eng, type: ping, from: SALES-PC, to: ENG-PC }
+layout:
+  nodes:
+    DIST: { x: 200, y: 60 }
+    ACC: { x: 200, y: 200 }
+    SALES-PC: { x: 80, y: 340 }
+    ENG-PC: { x: 320, y: 340 }

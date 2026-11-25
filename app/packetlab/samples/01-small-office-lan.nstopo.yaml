@@ -1,0 +1,63 @@
+nstopo: "0.1"
+meta:
+  name: small-office-lan
+  author: VU3INI
+  description: One router-on-a-stick, one switch, two VLANs, DHCP from the router, NAT to the Internet
+sites:
+  office: { scope: lan, label: "Small office" }
+  inet:   { scope: wan, label: "Internet" }
+link_profiles:
+  access-1g: { bandwidth: 1Gbps, delay: 0.02ms }
+  dsl-50m:   { bandwidth: 50Mbps, delay: 12ms, jitter: 2ms, loss: 0.1% }
+addressing:
+  staff:  { ipv4: 192.168.10.0/24, purpose: lan }
+  guests: { ipv4: 192.168.20.0/24, purpose: lan }
+nodes:
+  R1:
+    kind: router
+    site: office
+    interfaces:
+      Gi0/0: { ipv4: 192.168.10.1/24 }
+      Gi0/1: { ipv4: 192.168.20.1/24 }
+      Gi0/2: { ipv4: 203.0.113.2/30 }
+    services: { dhcp: { pools: [staff, guests] } }
+    policies: { nat: { inside: [Gi0/0, Gi0/1], outside: Gi0/2, overload: true } }
+  SW1:
+    kind: switch
+    site: office
+    vlans: { 10: staff, 20: guests }
+    interfaces:
+      Gi0/1: { vlan: 10 }
+      Gi0/2: { vlan: 20 }
+      Gi0/3: { vlan: 10 }
+      Gi0/4: { vlan: 10 }
+      Gi0/24: { vlan: 10 }
+      Gi0/23: { vlan: 20 }
+  PC1: { kind: host, site: office, interfaces: { eth0: { ipv4: dhcp } } }
+  PC2: { kind: host, site: office, interfaces: { eth0: { ipv4: dhcp } } }
+  Laptop1: { kind: host, site: office, interfaces: { eth0: { ipv4: dhcp } } }
+  Printer: { kind: host, site: office, interfaces: { eth0: { ipv4: 192.168.10.50/24, gateway: 192.168.10.1 } } }
+  ISP: { kind: cloud, site: inet }
+links:
+  - { a: SW1:Gi0/24, b: R1:Gi0/0, profile: access-1g }
+  - { a: SW1:Gi0/23, b: R1:Gi0/1, profile: access-1g }
+  - { a: SW1:Gi0/1, b: PC1:eth0, profile: access-1g }
+  - { a: SW1:Gi0/3, b: PC2:eth0, profile: access-1g }
+  - { a: SW1:Gi0/2, b: Laptop1:eth0, profile: access-1g }
+  - { a: SW1:Gi0/4, b: Printer:eth0, profile: access-1g }
+  - { a: R1:Gi0/2, b: ISP:port1, profile: dsl-50m, label: uplink }
+tests:
+  - { id: pc1-lease, type: dhcp.lease, on: PC1, expect: { pool: staff } }
+  - { id: guest-lease, type: dhcp.lease, on: Laptop1, expect: { pool: guests } }
+  - { id: pc-to-printer, type: ping, from: PC1, to: Printer, expect: { loss_max: 0% } }
+  - { id: internet, type: ping, from: PC2, to: ISP, expect: { reachable: true, loss_max: 1% } }
+  - { id: uplink-speed, type: rfc2544.throughput, link: uplink, frame_sizes: [64, 1518], expect: { min: 35Mbps } }
+layout:
+  nodes:
+    ISP: { x: 300, y: -60 }
+    R1: { x: 300, y: 60 }
+    SW1: { x: 300, y: 200 }
+    PC1: { x: 80, y: 340 }
+    PC2: { x: 230, y: 340 }
+    Laptop1: { x: 380, y: 340 }
+    Printer: { x: 530, y: 340 }

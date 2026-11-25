@@ -1,0 +1,16 @@
+# build outputs (the installer is published as a GitHub Release asset)
+build/
+release/
+wheels/
+__pycache__/
+*.pyc
+*.spec
+*.log
+COMMIT_MSG.txt
+publish_result.txt
+publish_log.txt
+publish_steps.bat
+install_gh_log.txt
+INSTALL_GH.bat
+SIGN_IN_GITHUB.bat
+gh_auth_status.txt
